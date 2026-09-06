@@ -1,0 +1,427 @@
+<! DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twitch chat</title>
+    <!-- Font: Zpix (最像素) by SolidZORO, free for personal use -- https://github.com/SolidZORO/zpix-pixel-font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/comfy.js@latest/dist/comfy.min.js"></script>
+
+    <style>
+        :root {
+            --ff-bg: #0a0a2e;
+            --ff-border: #c8aa6e;
+            --ff-text: #f0e6d3;
+            --ff-username: #5ca0f0;
+            --ff-timestamp: #7a7a9a;
+            --ff-dim: rgba(240, 230, 211, 0.35);
+            --ff-mod: #ff7b6b;
+            --ff-sub: #7bff9b;
+            --ff-vip: #ffb86b;
+        }
+
+        @font-face {
+            font-family: 'Zpix';
+            src: url("zpix.woff2") format("woff2");
+            font-display: swap;
+        }
+        html, body {
+            margin: 0;
+            font-family: 'Zpix', 'SeedComputer', 'Press Start 2P', monospace;
+        }
+
+        #chat {
+            width: 400px;
+            height: 350px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column-reverse;
+            background-color: var(--ff-bg);
+            border: 3px solid var(--ff-border);
+            color: var(--ff-text);
+            box-sizing: border-box;
+            padding: 10px;
+        }
+
+        #chat::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #chat::-webkit-scrollbar-track {
+            background: var(--ff-bg);
+        }
+
+        #chat::-webkit-scrollbar-thumb {
+            background: var(--ff-border);
+            border: 2px solid var(--ff-bg);
+        }
+
+        #chat ul {
+            list-style-type: none;
+            list-style-position: outside;
+            padding: 0;
+            margin: 0;
+        }
+
+        #chat li {
+            padding: 6px 2px;
+            font-size: 16px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            border-bottom: 1px dashed rgba(200, 170, 110, 0.35);
+        }
+
+        #chat li:not(:last-of-type) {
+            opacity: 0.6;
+        }
+
+        #chat .user {
+            color: var(--ff-username);
+        }
+
+        #chat .user.mod {
+            color: var(--ff-mod);
+        }
+
+        #chat .user.sub {
+            color: var(--ff-sub);
+        }
+
+        #chat .user.vip {
+            color: var(--ff-vip);
+        }
+
+        #chat img.badge {
+            height: 1em;
+            width: auto;
+            vertical-align: middle;
+            margin-right: 4px;
+            image-rendering: pixelated;
+            display: inline-block;
+        }
+
+        #chat blockquote {
+            margin: 4px 0 0 14px;
+            color: var(--ff-text);
+        }
+
+        #chat .timestamp {
+            color: var(--ff-timestamp);
+            font-size: 16px;
+            margin-left: 6px;
+        }
+
+        #chat img.emote {
+            height: 2em;
+            vertical-align: middle;
+            image-rendering: pixelated;
+            display: inline-block;
+        }
+
+        #chat .e-stack {
+            position: relative;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        #chat .e-stack img.emote {
+            display: block;
+        }
+
+        #chat .e-stack img.emote.overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+    </style>
+
+</head>
+<body>
+    <div id="chat">
+        <ul>
+        </ul>
+    </div>
+    <script>
+    var chat = document.querySelector("#chat>ul");
+
+    function escapeHtml(text) {
+        var div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    var sevenTv = {};
+    var sevenTvOverlay = {};
+    var channelEmotesLoaded = false;
+
+    function addSevenTvEmotes(emotes) {
+        (emotes || []).forEach(function (e) {
+            if (!e.data || !e.data.host || !e.data.host.url) return;
+            var url = "https:" + e.data.host.url + "/2x.webp";
+            var zeroWidth = (e.flags & 1) || (e.data && (e.data.flags & 256));
+            (zeroWidth ? sevenTvOverlay : sevenTv)[e.name] = url;
+        });
+    }
+
+    function loadSevenTvGlobal() {
+        fetch("https://7tv.io/v3/emote-sets/global")
+            .then(function (r) { return r.json(); })
+            .then(function (data) { addSevenTvEmotes(data.emotes); })
+            .catch(function () {});
+    }
+
+    function loadSevenTvChannel(roomId) {
+        if (channelEmotesLoaded || !roomId) return;
+        channelEmotesLoaded = true;
+        fetch("https://7tv.io/v3/users/twitch/" + roomId)
+            .then(function (r) { return r.json(); })
+            .then(function (user) {
+                if (!user || !user.emote_set_id) return null;
+                return fetch("https://7tv.io/v3/emote-sets/" + user.emote_set_id).then(function (r) { return r.json(); });
+            })
+            .then(function (set) { addSevenTvEmotes(set && set.emotes); })
+            .catch(function () {});
+    }
+
+    var badges = {};
+    var badgeSubFallback = "";
+
+    function storeBadges(data) {
+        (data && data.badges || []).forEach(function (b) {
+            if (!b || !b.setID) return;
+            var url = b.imageURL;
+            if (/\/1$/.test(url)) url = url.slice(0, -1) + "2";
+            var setId = b.setID;
+            badges[setId + "/1"] = url;
+            if (setId === "subscriber") {
+                var isPlain = (b.title || "") === "Subscriber";
+                var m = /^(\d+)-Month Subscriber$/.exec(b.title || "");
+                if (m) badges[setId + "/" + m[1]] = url;
+                if (isPlain || !badgeSubFallback) badgeSubFallback = url;
+            }
+        });
+    }
+
+    function loadGlobalBadges() {
+        fetch("https://api.twitchinsights.net/v1/badges/global")
+            .then(function (r) { return r.json(); })
+            .then(storeBadges)
+            .catch(function () {});
+    }
+
+    function badgeImages(userBadges) {
+        var html = "";
+        if (!userBadges) return html;
+        Object.keys(userBadges).forEach(function (setId) {
+            var url = badges[setId + "/" + userBadges[setId]];
+            if (!url && setId === "subscriber") url = badgeSubFallback;
+            if (url) html += "<img class=\"badge\" src=\"" + url + "\" alt=\"\">";
+        });
+        return html;
+    }
+
+    loadGlobalBadges();
+
+    loadSevenTvGlobal();
+
+    function emoteImg(url) {
+        return "<img class=\"emote\" src=\"" + url +
+            "\" alt=\"\" onerror=\"this.remove();\">";
+    }
+
+    function typeMessage(blockquote, units) {
+        var done = 0;
+        var timer = setInterval(function () {
+            if (done >= units.length) {
+                clearInterval(timer);
+                return;
+            }
+            blockquote.insertAdjacentHTML("beforeend", units[done].html);
+            done++;
+            applyOverlays(blockquote);
+        }, 25);
+    }
+
+    function applyOverlays(blockquote) {
+        blockquote.querySelectorAll("img.overlay").forEach(function (img) {
+            if (img.closest(".e-stack")) return;
+            var node = img.previousSibling;
+            var base = null;
+            while (node && node !== blockquote) {
+                if (node.nodeType === 3 && !/\S/.test(node.nodeValue)) {
+                    node = node.previousSibling;
+                    continue;
+                }
+                if (node.nodeType === 1) {
+                    if (node.classList.contains("emote")) {
+                        base = node;
+                        break;
+                    }
+                    if (node.classList.contains("e-stack")) {
+                        base = node;
+                        break;
+                    }
+                }
+                break;
+            }
+            if (!base) return;
+            var stack;
+            if (base.classList && base.classList.contains("e-stack")) {
+                stack = base;
+            } else {
+                stack = document.createElement("span");
+                stack.className = "e-stack";
+                base.parentNode.replaceChild(stack, base);
+                stack.appendChild(base);
+            }
+            stack.appendChild(img);
+        });
+    }
+
+    function parseTwitchRanges(messageEmotes) {
+        var parsed = {};
+        if (typeof messageEmotes === "string") {
+            messageEmotes.split("/").forEach(function (group) {
+                if (!group) return;
+                var colon = group.indexOf(":");
+                var id = group.slice(0, colon);
+                var ranges = group.slice(colon + 1).split(",");
+                parsed[id] = ranges.map(function (r) {
+                    var dash = r.indexOf("-");
+                    return [r.slice(0, dash), r.slice(dash + 1)];
+                });
+            });
+        } else if (messageEmotes && typeof messageEmotes === "object") {
+            parsed = messageEmotes;
+        }
+        var ranges = [];
+        Object.keys(parsed).forEach(function (emoteId) {
+            parsed[emoteId].forEach(function (r) {
+                var start, end;
+                if (typeof r === "string") {
+                    var dash = r.indexOf("-");
+                    start = parseInt(r.slice(0, dash), 10);
+                    end = parseInt(r.slice(dash + 1), 10);
+                } else {
+                    start = parseInt(r[0], 10);
+                    end = parseInt(r[1], 10);
+                }
+                ranges.push({ id: emoteId, start: start, end: end });
+            });
+        });
+        ranges.sort(function (a, b) { return a.start - b.start; });
+        return ranges;
+    }
+
+    function twitchEmoteUnit(range) {
+        var url = "https://static-cdn.jtvnw.net/emoticons/v2/" +
+            range.id + "/default/dark/2.0";
+        return emoteImg(url);
+    }
+
+    function buildUnits(message, messageEmotes) {
+        var twitchRanges = parseTwitchRanges(messageEmotes);
+        var units = [];
+        var i = 0;
+
+        function nearTwitchRange() {
+            for (var k = 0; k < twitchRanges.length; k++) {
+                if (twitchRanges[k].start === i) return twitchRanges[k];
+            }
+            return null;
+        }
+
+        while (i < message.length) {
+            var range = nearTwitchRange();
+            if (range) {
+                units.push({ html: twitchEmoteUnit(range) });
+                i = range.end + 1;
+                continue;
+            }
+            if (/\s/.test(message[i])) {
+                units.push({ html: escapeHtml(message[i]) });
+                i++;
+                continue;
+            }
+            var wordEnd = i;
+            while (wordEnd < message.length && !/\s/.test(message[wordEnd])) {
+                var r2 = null;
+                for (var k2 = 0; k2 < twitchRanges.length; k2++) {
+                    if (twitchRanges[k2].start === wordEnd) { r2 = twitchRanges[k2]; break; }
+                }
+                if (r2) break;
+                wordEnd++;
+            }
+            var word = message.slice(i, wordEnd);
+            var overlay = false;
+            var url = sevenTv[word];
+            if (!url && sevenTvOverlay[word]) {
+                url = sevenTvOverlay[word];
+                overlay = true;
+            }
+            if (!url) {
+                var lead = 0;
+                while (lead < word.length && /^[([{<]$/.test(word[lead])) lead++;
+                var tail = 0;
+                while (tail < word.length - lead && /^[!.,;:?)\]}>]$/.test(word[word.length - 1 - tail])) tail++;
+                var core = word.slice(lead, word.length - tail);
+                overlay = !!sevenTvOverlay[core];
+                url = sevenTv[core] || sevenTvOverlay[core];
+                if (core !== word && url) {
+                    var u;
+                    for (u = 0; u < lead; u++) units.push({ html: escapeHtml(word[u]) });
+                    units.push({ html: emoteImg(url).replace("class=\"emote\"", overlay ? "class=\"emote overlay\"" : "class=\"emote\"") });
+                    for (u = 0; u < tail; u++) units.push({ html: escapeHtml(word[word.length - tail + u]) });
+                    i = wordEnd;
+                    continue;
+                }
+            }
+            if (url) {
+                units.push({ html: emoteImg(url).replace("class=\"emote\"", overlay ? "class=\"emote overlay\"" : "class=\"emote\"") });
+                i = wordEnd;
+                continue;
+            }
+            for (var c = i; c < wordEnd; c++) units.push({ html: escapeHtml(message[c]) });
+            i = wordEnd;
+        }
+        return units;
+    }
+
+    ComfyJS.onChat = (user, message, flags, self, extra) => {
+        loadSevenTvChannel(extra.roomId);
+        if (user.toLowerCase() === "streamelements") return;
+        var newMessage = document.createElement("li");
+        var username = document.createElement("span");
+        var blockquote = document.createElement("blockquote");
+        var timestamp = document.createElement("span");
+
+        username.className = "user";
+        if (flags.mod) username.classList.add("mod");
+        if (flags.subscriber) username.classList.add("sub");
+        if (flags.vip) username.classList.add("vip");
+
+        username.innerHTML = badgeImages(extra.userBadges) + escapeHtml(user) + ":";
+
+        var now = new Date();
+        var hh = String(now.getHours()).padStart(2, "0");
+        var mm = String(now.getMinutes()).padStart(2, "0");
+        timestamp.className = "timestamp";
+        timestamp.innerText = hh + ":" + mm;
+
+        blockquote.innerHTML = "";
+
+        newMessage.append(username, timestamp, blockquote);
+        chat.append(newMessage);
+        typeMessage(blockquote, buildUnits(message, extra.messageEmotes));
+    }
+    
+    ComfyJS.Init("DarodriaN");
+    </script>
+</body>
+</html>
