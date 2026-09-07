@@ -11,6 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/comfy.js@latest/dist/comfy.min.js"></script>
+    <script src="channel.js"></script>
 
     <style>
         :root {
@@ -67,6 +68,12 @@
 
         #chat li:not(:last-of-type) {
             opacity: 0.6;
+        }
+
+        #chat .config-notice {
+            color: var(--ff-dim);
+            font-size: 24px;
+            padding: 12px 4px;
         }
 
         #chat .user {
@@ -126,6 +133,52 @@
             left: 50%;
             transform: translate(-50%, -50%);
         }
+
+        #chat img.fx-flipx { transform: scaleX(-1); }
+        #chat img.fx-flipy { transform: scaleY(-1); }
+        #chat img.fx-wide {
+            transform: scaleX(2);
+            transform-origin: left center;
+            margin-right: 2em;
+        }
+        #chat img.fx-flipx.fx-wide, #chat img.fx-wide.fx-flipx { transform: scaleX(-2); }
+        #chat img.fx-cursed { filter: grayscale(1) contrast(1.6) brightness(0.88); }
+        #chat img.fx-hyper {
+            filter: saturate(3) hue-rotate(300deg) contrast(1.5);
+            animation: fx-shake 0.12s linear infinite;
+        }
+        #chat img.fx-rainbow { animation: fx-rainbow 1s linear infinite; }
+        #chat img.fx-jam { animation: fx-jam 0.5s linear infinite; }
+        #chat img.fx-bounce { animation: fx-bounce 0.9s ease-in-out infinite; }
+        #chat img.fx-spin { animation: fx-spin 1s linear infinite; }
+
+        @keyframes fx-rainbow {
+            from { filter: hue-rotate(0deg); }
+            to   { filter: hue-rotate(360deg); }
+        }
+        @keyframes fx-shake {
+            0%   { transform: translate(0, 0); }
+            25%  { transform: translate(-3px, 2px); }
+            50%  { transform: translate(3px, -2px); }
+            75%  { transform: translate(-2px, -3px); }
+            100% { transform: translate(2px, 3px); }
+        }
+        @keyframes fx-jam {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            25%      { transform: translateY(3px) rotate(-4deg); }
+            75%      { transform: translateY(-3px) rotate(4deg); }
+        }
+        @keyframes fx-bounce {
+            0%, 100% { transform: scaleY(1); }
+            20%      { transform: scaleY(0.7); }
+            40%      { transform: scaleX(-1) scaleY(1); }
+            60%      { transform: scaleX(-1) scaleY(0.7); }
+            80%      { transform: scaleY(1); }
+        }
+        @keyframes fx-spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
     </style>
 
 </head>
@@ -146,6 +199,18 @@
     var sevenTv = {};
     var sevenTvOverlay = {};
     var channelEmotesLoaded = false;
+
+    var FFZ_MODIFIERS = {
+        "ffzW": "fx-wide",
+        "ffzX": "fx-flipx",
+        "ffzY": "fx-flipy",
+        "ffzCursed": "fx-cursed",
+        "ffzRainbow": "fx-rainbow",
+        "ffzHyper": "fx-hyper",
+        "ffzBounce": "fx-bounce",
+        "ffzJam": "fx-jam",
+        "ffzSpin": "fx-spin"
+    };
 
     function addSevenTvEmotes(emotes) {
         (emotes || []).forEach(function (e) {
@@ -173,6 +238,38 @@
                 return fetch("https://7tv.io/v3/emote-sets/" + user.emote_set_id).then(function (r) { return r.json(); });
             })
             .then(function (set) { addSevenTvEmotes(set && set.emotes); })
+            .catch(function () {});
+    }
+
+    var bttv = {};
+    var bttvOverlay = {};
+    var bttvChannelLoaded = false;
+
+    function addBttvEmotes(emotes) {
+        (emotes || []).forEach(function (e) {
+            if (!e || !e.id || !e.code) return;
+            var url = "https://cdn.betterttv.net/emote/" + e.id + "/3x";
+            (e.zeroWidth ? bttvOverlay : bttv)[e.code] = url;
+        });
+    }
+
+    function loadBttvGlobal() {
+        fetch("https://api.betterttv.net/3/cached/emotes/global")
+            .then(function (r) { return r.json(); })
+            .then(addBttvEmotes)
+            .catch(function () {});
+    }
+
+    function loadBttvChannel(roomId) {
+        if (bttvChannelLoaded || !roomId) return;
+        bttvChannelLoaded = true;
+        fetch("https://api.betterttv.net/3/cached/users/twitch/" + roomId)
+            .then(function (r) { return r.json(); })
+            .then(function (user) {
+                if (!user || !user.channelEmotes) return;
+                addBttvEmotes(user.channelEmotes);
+                addBttvEmotes(user.sharedEmotes);
+            })
             .catch(function () {});
     }
 
@@ -217,6 +314,8 @@
 
     loadSevenTvGlobal();
 
+    loadBttvGlobal();
+
     function emoteImg(url) {
         return "<img class=\"emote\" src=\"" + url +
             "\" alt=\"\" onerror=\"this.remove();\">";
@@ -229,7 +328,17 @@
                 clearInterval(timer);
                 return;
             }
-            blockquote.insertAdjacentHTML("beforeend", units[done].html);
+            var unit = units[done];
+            if (unit.mod) {
+                var emotes = blockquote.querySelectorAll("img.emote");
+                if (emotes.length) {
+                    var el = emotes[emotes.length - 1];
+                    if (el.closest(".e-stack")) el = el.closest(".e-stack");
+                    el.classList.add(unit.mod);
+                }
+            } else {
+                blockquote.insertAdjacentHTML("beforeend", unit.html);
+            }
             done++;
             applyOverlays(blockquote);
         }, 25);
@@ -353,18 +462,41 @@
                 overlay = true;
             }
             if (!url) {
+                url = bttv[word];
+                if (!url && bttvOverlay[word]) {
+                    url = bttvOverlay[word];
+                    overlay = true;
+                }
+            }
+            if (!url) {
                 var lead = 0;
                 while (lead < word.length && /^[([{<]$/.test(word[lead])) lead++;
                 var tail = 0;
                 while (tail < word.length - lead && /^[!.,;:?)\]}>]$/.test(word[word.length - 1 - tail])) tail++;
                 var core = word.slice(lead, word.length - tail);
-                overlay = !!sevenTvOverlay[core];
-                url = sevenTv[core] || sevenTvOverlay[core];
+                overlay = !!sevenTvOverlay[core] || !!bttvOverlay[core];
+                url = sevenTv[core] || sevenTvOverlay[core] || bttv[core] || bttvOverlay[core];
                 if (core !== word && url) {
                     var u;
                     for (u = 0; u < lead; u++) units.push({ html: escapeHtml(word[u]) });
                     units.push({ html: emoteImg(url).replace("class=\"emote\"", overlay ? "class=\"emote overlay\"" : "class=\"emote\"") });
                     for (u = 0; u < tail; u++) units.push({ html: escapeHtml(word[word.length - tail + u]) });
+                    i = wordEnd;
+                    continue;
+                }
+            }
+            var fx = !url && FFZ_MODIFIERS[word];
+            if (fx) {
+                var prevEmote = false;
+                for (var p = units.length - 1; p >= 0; p--) {
+                    var h = units[p].html;
+                    if (typeof h !== "string" || !h) continue;
+                    if (!/\S/.test(h)) continue;
+                    prevEmote = /<img /.test(h);
+                    break;
+                }
+                if (prevEmote) {
+                    units.push({ mod: fx });
                     i = wordEnd;
                     continue;
                 }
@@ -382,6 +514,7 @@
 
     ComfyJS.onChat = (user, message, flags, self, extra) => {
         loadSevenTvChannel(extra.roomId);
+        loadBttvChannel(extra.roomId);
         if (user.toLowerCase() === "streamelements") return;
         var newMessage = document.createElement("li");
         var username = document.createElement("span");
@@ -408,7 +541,20 @@
         typeMessage(blockquote, buildUnits(message, extra.messageEmotes));
     }
     
-    ComfyJS.Init("DarodriaN");
+    var notice = null;
+
+    function configNotice(message) {
+        notice = document.createElement("li");
+        notice.className = "config-notice";
+        notice.textContent = message;
+        chat.appendChild(notice);
+    }
+
+    if (typeof CHANNEL !== "string" || !CHANNEL.trim()) {
+        configNotice("channel.js missing - add your Twitch channel name and refresh");
+    } else {
+        ComfyJS.Init(CHANNEL.trim().replace(/^#/, ""));
+    }
     </script>
 </body>
 </html>
